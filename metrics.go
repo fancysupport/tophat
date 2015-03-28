@@ -52,9 +52,30 @@ type MetricGraphRequest struct {
 	Step       *Timestep
 	Fn         MetricFn
 	FillZero   bool
+	NumSteps   int // optional to override Timestep defined steps
 }
 
-type MetricGraph [][2]float64
+type MetricGraph struct {
+	Tags   map[string]string `json:"tags"`
+	Values [][2]float64      `json:"values"`
+}
+
+func (mg *MetricGraph) Spark() []float64 {
+	values := make([]float64, 0, len(mg.Values))
+	for _, v := range mg.Values {
+		values = append(values, v[1])
+	}
+	return values
+}
+
+func (mg *MetricGraph) SparkString() string {
+	spark := mg.Spark()
+	s := ""
+	for _, v := range spark {
+		s += strconv.FormatFloat(v, 'f', -1, 64) + " "
+	}
+	return s
+}
 
 func write_key(key string, mv MetricValue, t *Timestep, previous bool) string {
 	// make a key for redis that looks like
@@ -142,16 +163,35 @@ func (m *Metric) Graph(conn redis.Conn, mgr MetricGraphRequest) (*MetricGraph, e
 
 	sort.Float64s(keys)
 
-	// now we can actually assemble the sorted array of arrays
-	result := make(MetricGraph, 0, len(keys))
-
-	for _, timestamp := range keys {
-		result = append(result, [2]float64{timestamp, unpacked[timestamp]})
+	// determine how many steps we need
+	num_steps := mgr.Step.NumSteps
+	if mgr.NumSteps > 0 {
+		num_steps = mgr.NumSteps
 	}
 
-	fmt.Println(unpacked)
+	// now we can actually assemble the sorted array of arrays
+	values := make([][2]float64, 0, num_steps)
 
-	return &result, nil
+	// get the list of steps we need to return
+	list := mgr.Step.PeriodStepList(now, num_steps)
+
+	// construct the result, optionally fill empty steps
+	for _, timestamp := range list {
+		t := float64(timestamp)
+		val, exists := unpacked[t]
+		if exists {
+			values = append(values, [2]float64{t, val})
+		} else if mgr.FillZero {
+			values = append(values, [2]float64{t, 0})
+		}
+	}
+
+	result := &MetricGraph{
+		Tags:   m.tag_map(mgr.TagValues),
+		Values: values,
+	}
+
+	return result, nil
 }
 
 func remake_timestamp(start int64, offset int, period Time) int64 {
@@ -206,4 +246,12 @@ func (m *Metric) tsdb_string(mv MetricValue) string {
 		tags += m.Tags[x] + "=" + mv.TagValues[x] + " "
 	}
 	return fmt.Sprintf("put %s %d %f %s", m.Key, mv.Timestamp.Unix(), mv.ValueFloat, tags)
+}
+
+func (m *Metric) tag_map(values []string) map[string]string {
+	tagmap := map[string]string{}
+	for x := range m.Tags {
+		tagmap[m.Tags[x]] = values[x]
+	}
+	return tagmap
 }

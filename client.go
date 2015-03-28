@@ -100,6 +100,54 @@ func (c *Client) Graph(mgr MetricGraphRequest) (*MetricGraph, error) {
 	return m.Graph(conn, mgr)
 }
 
+func (c *Client) GraphEachTag(mgr MetricGraphRequest, tag string, tag_values []string) ([]*MetricGraph, error) {
+	// a helper function to return a multi series given a substitution list of tag values
+	// get a group by result but it doesn't go and discover the key list as it's provided
+	// find the metric by name
+	m, exists := c.metrics[mgr.MetricName]
+	if !exists {
+		return nil, errors.New("No metric with name: " + mgr.MetricName)
+	}
+
+	// find the tag index
+	index := -1
+	for i, t := range m.Tags {
+		if t == tag {
+			index = i
+		}
+	}
+
+	// validate we can replace tags
+	if index == -1 {
+		return nil, errors.New("Replacement tag index invalid for metric: " + m.Name)
+	}
+
+	graphs := make([]*MetricGraph, 0, len(tag_values))
+
+	for _, tv := range tag_values {
+		new_request := MetricGraphRequest{
+			MetricName: mgr.MetricName,
+			TagValues:  make([]string, len(m.Tags)),
+			Step:       mgr.Step,
+			Fn:         mgr.Fn,
+			FillZero:   mgr.FillZero,
+			NumSteps:   mgr.NumSteps,
+		}
+		// replace the tags
+		copy(new_request.TagValues, mgr.TagValues)
+		new_request.TagValues[index] = tv
+
+		g, err := c.Graph(new_request)
+		if err != nil {
+			return nil, err
+		}
+
+		graphs = append(graphs, g)
+	}
+
+	return graphs, nil
+}
+
 func NewClient(pool *redis.Pool) (*Client, error) {
 
 	client := &Client{

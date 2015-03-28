@@ -1,7 +1,11 @@
 package main
 
 import (
+	crand "crypto/rand"
+	"encoding/base64"
 	"fmt"
+	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/fancysupport/tophat"
@@ -9,17 +13,6 @@ import (
 )
 
 func main() {
-	now := time.Now().UTC()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	yesterday := time.Date(now.Year(), now.Month(), now.Day()-1, 0, 0, 0, 0, time.UTC)
-	//feb := today.AddDate(0, 0, -24)
-	//feb2 := time.Date(now.Year()-3, now.Month(), now.Day()-24, 0, 0, 0, 0, time.UTC)
-	//april := today.AddDate(0, 0, 8)
-	march1 := time.Date(2015, time.March, 1, 0, 0, 0, 0, time.UTC)
-	feb28 := march1.AddDate(0, 0, -1)
-	fmt.Println(today)
-	fmt.Println(yesterday)
-	fmt.Println(feb28)
 
 	t := 10 * time.Second
 	red := &redis.Pool{
@@ -51,36 +44,59 @@ func main() {
 		panic(err)
 	}
 
-	for x := 0; x < 2; x++ {
-		err = th.Write(tophat.MetricValue{
-			MetricName: "impression",
-			TagValues:  []string{"test", "test"},
-			Timestamp:  time.Now(),
-			ValueFloat: 2.2,
-		})
-		if err != nil {
-			panic(err)
-		}
-	}
-
 	start := time.Now()
+	for _, cid := range []string{"iV90", "FBpO", "1loL", "1loL", "fq-e", "ZHQU", "ibSJ", "NmmM", "Hf4K", "o_AF"} {
+		//cid := token(3)
 
-	var graph *tophat.MetricGraph
-	for x := 0; x < 1000; x++ {
-		graph, err = th.Graph(tophat.MetricGraphRequest{
-			MetricName: "impression",
-			TagValues:  []string{"test", "test"},
-			Step:       tophat.TimestepHour,
-			Fn:         tophat.SumFn,
-			FillZero:   true,
-		})
-		if err != nil {
-			panic(err)
+		for x := 0; x < 100; x++ {
+			err = th.Write(tophat.MetricValue{
+				MetricName: "impression",
+				TagValues:  []string{"test", cid},
+				Timestamp:  time.Unix(time.Now().Unix()-int64(rand.Intn(60*60*24)), 0),
+				ValueFloat: 1,
+			})
+			if err != nil {
+				panic(err)
+			}
 		}
+		fmt.Println("test", cid)
 	}
-
 	fmt.Println(time.Now().Sub(start))
 
-	fmt.Println(graph)
+	var graph *tophat.MetricGraph
+	graph, err = th.Graph(tophat.MetricGraphRequest{
+		MetricName: "impression",
+		TagValues:  []string{"test", "iV90"},
+		Step:       tophat.TimestepHour,
+		Fn:         tophat.CountFn,
+		FillZero:   true,
+	})
+	if err != nil {
+		panic(err)
+	}
 
+	graphs, err := th.GraphEachTag(tophat.MetricGraphRequest{
+		MetricName: "impression",
+		TagValues:  []string{"test", "test"},
+		Step:       tophat.TimestepHour,
+		Fn:         tophat.CountFn,
+		FillZero:   true,
+		NumSteps:   6,
+	}, "cid", []string{"iV90", "FBpO", "1loL", "1loL", "fq-e", "ZHQU", "ibSJ", "NmmM", "Hf4K", "o_AF"})
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(graph)
+	for _, g := range graphs {
+		fmt.Println(g)
+	}
+	//fmt.Println(graph.SparkString())
+
+}
+
+func token(length int) string {
+	bytes := make([]byte, length)
+	crand.Read(bytes)
+	return strings.TrimRight(base64.URLEncoding.EncodeToString(bytes), "=")
 }
