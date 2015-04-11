@@ -8,15 +8,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/garyburd/redigo/redis"
+	"github.com/fzzy/radix/extra/cluster"
+	"github.com/fzzy/radix/redis"
 )
 
 type MetricType struct {
-	Script *redis.Script
+	Script *Script
 }
 
 var DefaultMetric = MetricType{
-	Script: redis.NewScript(1, AggregateHash),
+	Script: NewScript(1, AggregateHash),
 }
 
 const SEP = ":"
@@ -91,7 +92,7 @@ func write_key(key string, mv MetricValue, t *Timestep, previous bool) string {
 	return k
 }
 
-func (m *Metric) WriteFloat(conn redis.Conn, mv MetricValue) error {
+func (m *Metric) WriteFloat(conn *cluster.Cluster, mv MetricValue) error {
 	// use the aggregation lua function to store data in a hashmap
 	// keys for the redis hashmap are the incremental offsets from the lower period of the timestep
 	// impression:1234:1427346000:h
@@ -106,9 +107,9 @@ func (m *Metric) WriteFloat(conn redis.Conn, mv MetricValue) error {
 		hash_key := step.PeriodStep(mv.Timestamp)
 		expires := step.PeriodExpireAt(mv.Timestamp)
 
-		_, err := m.Type.Script.Do(conn, redis_key, hash_key, expires, mv.ValueFloat)
-		if err != nil {
-			return err
+		reply := m.Type.Script.Cmd(conn, redis_key, hash_key, expires, mv.ValueFloat)
+		if reply.Err != nil {
+			return reply.Err
 		}
 
 		//fmt.Println(redis_key, hash_key, expires, mv.ValueFloat)
@@ -116,7 +117,7 @@ func (m *Metric) WriteFloat(conn redis.Conn, mv MetricValue) error {
 	return nil
 }
 
-func (m *Metric) Graph(conn redis.Conn, mgr MetricGraphRequest) (*MetricGraph, error) {
+func (m *Metric) Graph(conn *cluster.Cluster, mgr MetricGraphRequest) (*MetricGraph, error) {
 	// fetch the write_keys for current period and the previous
 	// return collection of points from now going back the step count defined in Timestep
 	// redis keys return hashmaps, with each value a packed binary string, we need to unpack
@@ -126,11 +127,11 @@ func (m *Metric) Graph(conn redis.Conn, mgr MetricGraphRequest) (*MetricGraph, e
 	key := write_key(m.Key, MetricValue{Timestamp: now, TagValues: mgr.TagValues}, mgr.Step, false)
 	ts := mgr.Step.StartOfPeriod(now)
 
-	pres, err := ByteMap(conn.Do("hgetall", pkey))
+	pres, err := ByteMap(conn.Cmd("hgetall", pkey))
 	if err != nil {
 		return nil, errors.New("Failed fetching previous key for graph (" + pkey + ") " + err.Error())
 	}
-	res, err := ByteMap(conn.Do("hgetall", key))
+	res, err := ByteMap(conn.Cmd("hgetall", key))
 	if err != nil {
 		return nil, errors.New("Failed fetching key for graph (" + pkey + ") " + err.Error())
 	}
@@ -216,28 +217,38 @@ func remake_timestamp(start int64, offset int, period Time) int64 {
 	return end.Unix()
 }
 
-// lifted from the redis helper StringMap
-// ByteMap is a helper that converts an array of strings (alternating key, value)
-// into a map[string][]byte. The HGETALL and CONFIG GET commands return replies in this format.
-// Requires an even number of values in result.
-func ByteMap(result interface{}, err error) (map[string][]byte, error) {
-	values, err := redis.Values(result, err)
-	if err != nil {
-		return nil, err
+func ByteMap(r *redis.Reply) (map[string][]byte, error) {
+	if r.Type == redis.ErrorReply {
+		return nil, r.Err
 	}
-	if len(values)%2 != 0 {
-		return nil, errors.New("redigo: ByteMap expects even number of values result")
+
+	rmap := make(map[string][]byte, len(r.Elems)/2)
+
+	if r.Type != redis.MultiReply {
+		return nil, errors.New("reply type is not MultiReply")
 	}
-	m := make(map[string][]byte, len(values)/2)
-	for i := 0; i < len(values); i += 2 {
-		key, okKey := values[i].([]byte)
-		value, okValue := values[i+1].([]byte)
-		if !okKey || !okValue {
-			return nil, errors.New("redigo: ScanMap key not a bulk string value")
+
+	if len(r.Elems)%2 != 0 {
+		return nil, errors.New("reply has odd number of elements")
+	}
+
+	for i := 0; i < len(r.Elems)/2; i++ {
+		key, err := r.Elems[i*2].Str()
+		if err != nil {
+			return nil, errors.New("key element has no string reply")
 		}
-		m[string(key)] = value
+
+		v := r.Elems[i*2+1]
+		if v.Type == redis.BulkReply {
+			val, _ := v.Bytes()
+			rmap[key] = val
+		} else if v.Type == redis.NilReply {
+		} else {
+			return nil, errors.New("value element type is not BulkReply or NilReply")
+		}
 	}
-	return m, nil
+
+	return rmap, nil
 }
 
 func (m *Metric) tsdb_string(mv MetricValue) string {
