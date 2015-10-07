@@ -3,11 +3,11 @@ package tophat
 import (
 	"errors"
 
-	"github.com/fzzy/radix/extra/cluster"
+	"github.com/fzzy/radix/extra/pool"
 )
 
 type Client struct {
-	pool    *cluster.Cluster
+	pool    *pool.Pool
 	steps   map[string]*Timestep
 	metrics map[string]*Metric
 }
@@ -140,10 +140,10 @@ func (c *Client) GraphEachTag(mgr MetricGraphRequest, tag string, tag_values []s
 	return graphs, nil
 }
 
-func NewClient(pool *cluster.Cluster) (*Client, error) {
+func NewClient(p *pool.Pool) (*Client, error) {
 
 	client := &Client{
-		pool:    pool,
+		pool:    p,
 		steps:   map[string]*Timestep{},
 		metrics: map[string]*Metric{},
 	}

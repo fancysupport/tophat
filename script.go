@@ -8,7 +8,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/fzzy/radix/extra/cluster"
+	"github.com/fzzy/radix/extra/pool"
 	"github.com/fzzy/radix/redis"
 )
 
@@ -39,10 +39,14 @@ func (s *Script) args(spec string, keysAndArgs []interface{}) []interface{} {
 	return args
 }
 
-func (s *Script) Cmd(c *cluster.Cluster, keysAndArgs ...interface{}) *redis.Reply {
+func (s *Script) Cmd(p *pool.Pool, keysAndArgs ...interface{}) *redis.Reply {
+	c, err := p.Get()
+	defer p.CarefullyPut(c, &err)
+
 	reply := c.Cmd("EVALSHA", s.args(s.hash, keysAndArgs)...)
 	if reply.Err != nil && strings.HasPrefix(reply.Err.Error(), "NOSCRIPT ") {
 		reply = c.Cmd("EVAL", s.args(s.src, keysAndArgs)...)
 	}
+
 	return reply
 }

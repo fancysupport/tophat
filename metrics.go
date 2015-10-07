@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fzzy/radix/extra/cluster"
+	"github.com/fzzy/radix/extra/pool"
 	"github.com/fzzy/radix/redis"
 )
 
@@ -92,7 +92,7 @@ func write_key(key string, mv MetricValue, t *Timestep, previous bool) string {
 	return k
 }
 
-func (m *Metric) WriteFloat(conn *cluster.Cluster, mv MetricValue) error {
+func (m *Metric) WriteFloat(p *pool.Pool, mv MetricValue) error {
 	// use the aggregation lua function to store data in a hashmap
 	// keys for the redis hashmap are the incremental offsets from the lower period of the timestep
 	// impression:1234:1427346000:h
@@ -107,7 +107,7 @@ func (m *Metric) WriteFloat(conn *cluster.Cluster, mv MetricValue) error {
 		hash_key := step.PeriodStep(mv.Timestamp)
 		expires := step.PeriodExpireAt(mv.Timestamp)
 
-		reply := m.Type.Script.Cmd(conn, redis_key, hash_key, expires, mv.ValueFloat)
+		reply := m.Type.Script.Cmd(p, redis_key, hash_key, expires, mv.ValueFloat)
 		if reply.Err != nil {
 			return reply.Err
 		}
@@ -117,7 +117,7 @@ func (m *Metric) WriteFloat(conn *cluster.Cluster, mv MetricValue) error {
 	return nil
 }
 
-func (m *Metric) Graph(conn *cluster.Cluster, mgr MetricGraphRequest) (*MetricGraph, error) {
+func (m *Metric) Graph(p *pool.Pool, mgr MetricGraphRequest) (*MetricGraph, error) {
 	// fetch the write_keys for current period and the previous
 	// return collection of points from now going back the step count defined in Timestep
 	// redis keys return hashmaps, with each value a packed binary string, we need to unpack
@@ -126,6 +126,9 @@ func (m *Metric) Graph(conn *cluster.Cluster, mgr MetricGraphRequest) (*MetricGr
 	pts := mgr.Step.StartOfPreviousPeriod(now)
 	key := write_key(m.Key, MetricValue{Timestamp: now, TagValues: mgr.TagValues}, mgr.Step, false)
 	ts := mgr.Step.StartOfPeriod(now)
+
+	conn, perr := p.Get()
+	defer p.CarefullyPut(conn, &perr)
 
 	pres, err := ByteMap(conn.Cmd("hgetall", pkey))
 	if err != nil {
