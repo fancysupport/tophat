@@ -46,16 +46,12 @@ func main() {
 
 	start := time.Now()
 	for _, cid := range []string{"iV90", "FBpO", "1loL", "1loL", "fq-e", "ZHQU", "ibSJ", "NmmM", "Hf4K", "o_AF"} {
-		//for a := 0; a < 1000; a++ {
-		//app := token(10)
-		app := "test"
-		//for c := 0; c < 1000; c++ {
-		//cid := token(10)
+		//cid := token(3)
 
 		for x := 0; x < 100; x++ {
 			err = th.Write(tophat.MetricValue{
 				MetricName: "impression",
-				TagValues:  []string{app, cid},
+				TagValues:  []string{"test", cid},
 				Timestamp:  time.Unix(time.Now().Unix()-int64(rand.Intn(60*60*24)), 0),
 				ValueFloat: 1,
 			})
@@ -63,10 +59,8 @@ func main() {
 				panic(err)
 			}
 		}
-		fmt.Println(app, cid)
+		fmt.Println("test", cid)
 	}
-	//}
-
 	fmt.Println(time.Now().Sub(start))
 
 	var graph *tophat.MetricGraph
@@ -87,6 +81,7 @@ func main() {
 		Step:       tophat.TimestepHour,
 		Fn:         tophat.CountFn,
 		FillZero:   true,
+		NumSteps:   6,
 	}, "cid", []string{"iV90", "FBpO", "1loL", "1loL", "fq-e", "ZHQU", "ibSJ", "NmmM", "Hf4K", "o_AF"})
 	if err != nil {
 		panic(err)
@@ -94,7 +89,7 @@ func main() {
 
 	fmt.Println(graph)
 	for _, g := range graphs {
-		fmt.Println(g.SparkString())
+		fmt.Println(g)
 	}
 	//fmt.Println(graph.SparkString())
 

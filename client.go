@@ -3,11 +3,11 @@ package tophat
 import (
 	"errors"
 
-	"github.com/fzzy/radix/extra/pool"
+	"github.com/garyburd/redigo/redis"
 )
 
 type Client struct {
-	pool    *pool.Pool
+	pool    *redis.Pool
 	steps   map[string]*Timestep
 	metrics map[string]*Metric
 }
@@ -66,8 +66,12 @@ func (c *Client) Write(mv MetricValue) error {
 		return errors.New("TagValues don't match the Tags count for the metric.")
 	}
 
+	// get a redis con
+	conn := c.pool.Get()
+	defer conn.Close()
+
 	// pass write off to metric
-	return m.WriteFloat(c.pool, mv)
+	return m.WriteFloat(conn, mv)
 }
 
 func (c *Client) Graph(mgr MetricGraphRequest) (*MetricGraph, error) {
@@ -88,8 +92,12 @@ func (c *Client) Graph(mgr MetricGraphRequest) (*MetricGraph, error) {
 		return nil, errors.New("That timestep is not in the list for that metric.")
 	}
 
+	// get a redis con
+	conn := c.pool.Get()
+	defer conn.Close()
+
 	// pass graph request
-	return m.Graph(c.pool, mgr)
+	return m.Graph(conn, mgr)
 }
 
 func (c *Client) GraphEachTag(mgr MetricGraphRequest, tag string, tag_values []string) ([]*MetricGraph, error) {
@@ -140,10 +148,10 @@ func (c *Client) GraphEachTag(mgr MetricGraphRequest, tag string, tag_values []s
 	return graphs, nil
 }
 
-func NewClient(p *pool.Pool) (*Client, error) {
+func NewClient(pool *redis.Pool) (*Client, error) {
 
 	client := &Client{
-		pool:    p,
+		pool:    pool,
 		steps:   map[string]*Timestep{},
 		metrics: map[string]*Metric{},
 	}
